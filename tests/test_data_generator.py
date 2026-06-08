@@ -27,14 +27,14 @@ class TestGetCardPool:
 
     def test_required_columns(self):
         pool = get_card_pool()
-        for col in ("card_number", "home_lat", "home_lon"):
+        for col in ("card_number", "home_lat", "home_long"):
             assert col in pool.columns, f"Missing column: {col}"
 
     def test_indonesia_coordinates(self):
         """All cards should have home coordinates within Indonesia's bounding box."""
         pool = get_card_pool()
         assert pool["home_lat"].between(-11.0, 6.0).all(), "Some latitudes outside Indonesia"
-        assert pool["home_lon"].between(95.0, 141.0).all(), "Some longitudes outside Indonesia"
+        assert pool["home_long"].between(95.0, 141.0).all(), "Some longitudes outside Indonesia"
 
 
 # ── Batch generation ──────────────────────────────────────────────────────────
@@ -49,8 +49,9 @@ class TestGenerateBatch:
 
     def test_required_columns(self, sample_batch):
         expected = {
-            "transaction_id", "card_number", "merchant_id",
-            "amount", "latitude", "longitude",
+            "transaction_id", "card_number", "merchant",
+            "amount", "lat", "long",
+            "merchant_lat", "merchant_long",
             "transaction_time", "is_fraud", "batch_date", "category",
         }
         missing = expected - set(sample_batch.columns)

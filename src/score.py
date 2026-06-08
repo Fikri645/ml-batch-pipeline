@@ -23,8 +23,9 @@ logger = logging.getLogger(__name__)
 # ── Model loading ─────────────────────────────────────────────────────────────
 
 
-def load_model(model_path: Path = MODEL_PATH):
-    """Load the joblib-serialised LightGBM pipeline."""
+def load_model(model_path=MODEL_PATH):
+    """Load the joblib-serialised LightGBM pipeline. Accepts str or Path."""
+    model_path = Path(model_path)
     if not model_path.exists():
         raise FileNotFoundError(
             f"Model artifact not found at {model_path}. "

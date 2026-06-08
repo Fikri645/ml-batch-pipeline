@@ -118,7 +118,7 @@ def generate_batch(
     legit_amounts = rng.lognormal(
         mean=np.log(sel["typical_amount"].values + 1), sigma=0.7
     ).clip(1, 2000)
-    fraud_amounts = rng.lognormal(mean=np.log(550), sigma=0.9).clip(50, 3000)
+    fraud_amounts = rng.lognormal(mean=np.log(550), sigma=0.9, size=n_transactions).clip(50, 3000)
     amounts = np.where(is_fraud, fraud_amounts, legit_amounts).round(2)
 
     # ── Merchant locations ────────────────────────────────────────────────────
