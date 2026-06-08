@@ -5,7 +5,6 @@ from __future__ import annotations
 from datetime import datetime
 
 import pandas as pd
-import pytest
 
 from src.data_generator import generate_batch, get_card_pool
 

@@ -100,8 +100,6 @@ def generate_batch(
 
     cards = get_card_pool()
     n_fraud = max(1, int(n_transactions * fraud_rate))
-    n_legit = n_transactions - n_fraud
-
     # ── Timestamps ────────────────────────────────────────────────────────────
     day_start = date.replace(hour=0, minute=0, second=0, microsecond=0)
     seconds = rng.uniform(0, 86400, n_transactions).astype(int)
@@ -150,7 +148,9 @@ def generate_batch(
     categories = rng.choice(CATEGORIES, size=n_transactions, p=cat_probs)
 
     # ── Merchants ─────────────────────────────────────────────────────────────
-    merchants = [f"MERCH_{rng.integers(1, MERCHANT_POOL_SIZE + 1):04d}" for _ in range(n_transactions)]
+    merchants = [
+        f"MERCH_{rng.integers(1, MERCHANT_POOL_SIZE + 1):04d}" for _ in range(n_transactions)
+    ]
 
     # ── Transaction IDs ───────────────────────────────────────────────────────
     txn_ids = [

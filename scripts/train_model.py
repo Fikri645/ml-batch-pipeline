@@ -22,8 +22,6 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import average_precision_score, roc_auc_score
 from sklearn.model_selection import train_test_split
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import FunctionTransformer
 
 # Make project root importable when running script directly
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -85,7 +83,6 @@ def engineer_features(raw_df: pd.DataFrame) -> pd.DataFrame:
         amt_ratio = []
 
         for i, (ts, amt) in enumerate(zip(times, amounts)):
-            window = grp[times <= ts]
             w1h = grp[(ts - times <= pd.Timedelta("1h")) & (times <= ts)]
             w24h = grp[(ts - times <= pd.Timedelta("24h")) & (times <= ts)]
             w7d = grp[(ts - times <= pd.Timedelta("7d")) & (times <= ts)]
@@ -186,7 +183,9 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train the fraud detection model.")
     parser.add_argument("--days", type=int, default=90, help="Days of history to generate")
     parser.add_argument("--n-per-day", type=int, default=500, help="Transactions per day")
-    parser.add_argument("--output", type=Path, default=MODEL_PATH, help="Output path for model artifact")
+    parser.add_argument(
+        "--output", type=Path, default=MODEL_PATH, help="Output path for model artifact"
+    )
     return parser.parse_args()
 
 

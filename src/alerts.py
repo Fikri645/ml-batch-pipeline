@@ -14,11 +14,9 @@ import logging
 import os
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Optional
-
 import pandas as pd
 import requests
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
 
 from src.config import DATABASE_URL
 from src.drift import DriftReport

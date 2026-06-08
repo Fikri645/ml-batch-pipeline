@@ -8,19 +8,19 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.drift import DriftReport, _compute_psi
+from src.drift import DriftReport, _psi_single
 
 
 # ── PSI computation (pure function) ──────────────────────────────────────────
 
 class TestComputePsi:
-    """Tests for the internal _compute_psi helper."""
+    """Tests for the internal _psi_single helper."""
 
     def test_identical_distributions_zero_psi(self):
         """Identical reference and current distributions → PSI ≈ 0."""
         rng = np.random.default_rng(0)
         ref = rng.normal(0, 1, 1000)
-        psi = _compute_psi(ref, ref.copy())
+        psi = _psi_single(ref, ref.copy())
         assert psi < 0.01, f"PSI for identical distributions should be ~0, got {psi:.4f}"
 
     def test_completely_different_distributions_high_psi(self):
@@ -28,7 +28,7 @@ class TestComputePsi:
         rng = np.random.default_rng(1)
         ref = rng.normal(0, 1, 1000)
         cur = rng.normal(10, 1, 1000)  # completely shifted
-        psi = _compute_psi(ref, cur)
+        psi = _psi_single(ref, cur)
         assert psi > 0.2, f"Non-overlapping distributions should give PSI > 0.2, got {psi:.4f}"
 
     def test_psi_non_negative(self):
@@ -36,7 +36,7 @@ class TestComputePsi:
         rng = np.random.default_rng(2)
         ref = rng.normal(0, 1, 500)
         cur = rng.normal(0.5, 1.2, 500)
-        psi = _compute_psi(ref, cur)
+        psi = _psi_single(ref, cur)
         assert psi >= 0.0
 
     def test_psi_symmetric_approx(self):
@@ -44,8 +44,8 @@ class TestComputePsi:
         rng = np.random.default_rng(3)
         ref = rng.normal(0, 1, 1000)
         cur = rng.normal(1, 1, 1000)
-        psi_fwd = _compute_psi(ref, cur)
-        psi_rev = _compute_psi(cur, ref)
+        psi_fwd = _psi_single(ref, cur)
+        psi_rev = _psi_single(cur, ref)
         assert abs(psi_fwd - psi_rev) < 0.15, "PSI should be roughly symmetric"
 
     def test_minor_shift_in_minor_range(self):
@@ -53,7 +53,7 @@ class TestComputePsi:
         rng = np.random.default_rng(4)
         ref = rng.normal(0, 1, 2000)
         cur = rng.normal(0.8, 1.1, 2000)  # moderate shift
-        psi = _compute_psi(ref, cur)
+        psi = _psi_single(ref, cur)
         # Not asserting exact range — just confirming it's between negligible and major
         assert 0 < psi, "Minor shift should give PSI > 0"
 
@@ -62,8 +62,8 @@ class TestComputePsi:
         rng = np.random.default_rng(5)
         ref = rng.normal(0, 1, 1000)
         cur = rng.normal(0.5, 1, 1000)
-        psi_5 = _compute_psi(ref, cur, bins=5)
-        psi_20 = _compute_psi(ref, cur, bins=20)
+        psi_5 = _psi_single(ref, cur, bins=5)
+        psi_20 = _psi_single(ref, cur, bins=20)
         assert psi_5 >= 0
         assert psi_20 >= 0
 
@@ -72,7 +72,9 @@ class TestComputePsi:
 
 class TestDriftReport:
     def test_overall_drift_true_when_feature_drifted(self):
+        from datetime import date
         report = DriftReport(
+            batch_date=date(2026, 3, 15),
             psi_by_feature={"amount": 0.25, "txn_count_1h": 0.05},
             drifted_features=["amount"],
             overall_drift=True,
@@ -81,7 +83,9 @@ class TestDriftReport:
         assert report.overall_drift is True
 
     def test_overall_drift_false_when_clean(self):
+        from datetime import date
         report = DriftReport(
+            batch_date=date(2026, 3, 15),
             psi_by_feature={"amount": 0.05, "txn_count_1h": 0.03},
             drifted_features=[],
             overall_drift=False,
@@ -91,8 +95,10 @@ class TestDriftReport:
         assert report.drifted_features == []
 
     def test_max_psi_matches_max_value(self):
+        from datetime import date
         psi_by_feature = {"amount": 0.12, "distance_km": 0.30, "hour_of_day": 0.02}
         report = DriftReport(
+            batch_date=date(2026, 3, 15),
             psi_by_feature=psi_by_feature,
             drifted_features=["distance_km"],
             overall_drift=True,
@@ -125,7 +131,7 @@ class TestComputeDrift:
     @patch("src.drift.create_engine")
     def test_returns_drift_report(self, mock_engine):
         """compute_drift() returns a DriftReport even with mocked DB."""
-        from datetime import datetime
+        from datetime import date
         from src.drift import compute_drift
 
         ref_df = self._make_fake_df(300, seed=10)
@@ -136,13 +142,12 @@ class TestComputeDrift:
         conn.__exit__ = MagicMock(return_value=False)
 
         mock_engine.return_value.connect.return_value = conn
-        conn.execute.return_value.fetchall.return_value = []
 
-        # Patch pd.read_sql to return controlled frames
+        # Patch pd.read_sql to return controlled frames (ref window then current)
         with patch("src.drift.pd.read_sql") as mock_read_sql:
             mock_read_sql.side_effect = [ref_df, cur_df]
             report = compute_drift(
-                batch_date=datetime(2026, 3, 15),
+                batch_date=date(2026, 3, 15),
                 db_url="postgresql://fake/fake",
                 reference_window_days=30,
                 alert_threshold=0.2,

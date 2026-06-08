@@ -10,7 +10,6 @@ import argparse
 import logging
 import sys
 from datetime import date, timedelta
-from pathlib import Path
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)

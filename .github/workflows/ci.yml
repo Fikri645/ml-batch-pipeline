@@ -136,8 +136,9 @@ jobs:
           AIRFLOW_VERSION=2.9.1
           PYTHON_VERSION=3.11
           CONSTRAINT_URL="https://raw.githubusercontent.com/apache/airflow/constraints-${AIRFLOW_VERSION}/constraints-${PYTHON_VERSION}.txt"
+          # Let the constraint file resolve the provider version (avoids pin conflicts)
           pip install "apache-airflow==${AIRFLOW_VERSION}" \
-            apache-airflow-providers-postgres==5.10.0 \
+            apache-airflow-providers-postgres \
             --constraint "${CONSTRAINT_URL}"
 
           # Install src deps so DAG imports succeed
@@ -195,7 +196,8 @@ jobs:
           cache: pip
 
       - name: Install dbt-postgres
-        run: pip install dbt-postgres==1.8.0
+        # Pin dbt-core<2.0 explicitly — pip may otherwise resolve to 2.0 alpha which dropped postgres
+        run: pip install "dbt-postgres==1.8.0" "dbt-core>=1.8.0,<2.0.0"
 
       - name: Write dbt profiles.yml
         run: |
