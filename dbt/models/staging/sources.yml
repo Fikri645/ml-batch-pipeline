@@ -1,0 +1,26 @@
+version: 2
+
+sources:
+  - name: raw
+    schema: raw
+    description: "Daily landing zone — raw transactions ingested by the Airflow pipeline."
+    tables:
+      - name: transactions
+        description: "One row per transaction in the daily batch."
+        columns:
+          - name: transaction_id
+            description: "Unique MD5 hash per transaction."
+            tests:
+              - not_null
+          - name: batch_date
+            description: "The calendar date this batch represents."
+            tests:
+              - not_null
+          - name: amount
+            description: "Transaction amount in local currency."
+            tests:
+              - not_null
+          - name: card_number
+            description: "Anonymised card identifier."
+            tests:
+              - not_null

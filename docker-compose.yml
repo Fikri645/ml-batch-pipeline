@@ -1,0 +1,133 @@
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# ml-batch-pipeline — Docker Compose
+#
+# Services:
+#   postgres       — shared PostgreSQL (Airflow metadata + data warehouse)
+#   airflow-init   — one-time setup (db migrate + create admin user)
+#   airflow-webserver
+#   airflow-scheduler
+#   scorer         — standalone Cloud Run-compatible scoring container (optional)
+#
+# Quick start:
+#   cp .env.example .env          # fill in secrets
+#   docker compose up -d postgres
+#   docker compose run --rm airflow-init
+#   docker compose run --rm airflow-init init-db   # create pipeline schemas
+#   docker compose run --rm airflow-init train     # train model artifact
+#   docker compose up -d
+#   open http://localhost:8080     # Airflow UI (admin / admin)
+# ─────────────────────────────────────────────────────────────────────────────
+
+x-airflow-common: &airflow-common
+  build:
+    context: .
+    dockerfile: docker/Dockerfile.airflow
+  env_file: .env
+  environment:
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: >-
+      postgresql+psycopg2://${DB_USER}:${DB_PASSWORD}@postgres:5432/airflow_meta
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
+    AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY}
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
+    # Pipeline env vars passed through to tasks
+    DB_HOST: postgres
+    DB_PORT: "5432"
+    DB_NAME: ${DB_NAME}
+    DB_USER: ${DB_USER}
+    DB_PASSWORD: ${DB_PASSWORD}
+    MODEL_PATH: /opt/airflow/project/models/lgbm_fraud.pkl
+    PSI_ALERT_THRESHOLD: ${PSI_ALERT_THRESHOLD:-0.2}
+    SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - ./logs:/opt/airflow/logs
+    - ./plugins:/opt/airflow/plugins
+    # Mount entire project so DAG can import src/
+    - .:/opt/airflow/project
+  depends_on:
+    postgres:
+      condition: service_healthy
+
+services:
+
+  # ── Data store ──────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_MULTIPLE_DATABASES: "airflow_meta,${DB_NAME}"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/init-multiple-dbs.sh:/docker-entrypoint-initdb.d/init-multiple-dbs.sh
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER}"]
+      interval: 10s
+      retries: 5
+      start_period: 5s
+
+  # ── Airflow init ─────────────────────────────────────────────────────────────
+  airflow-init:
+    <<: *airflow-common
+    entrypoint: /opt/airflow/project/docker/airflow-init.sh
+    environment:
+      <<: *airflow-common
+      _AIRFLOW_DB_MIGRATE: "true"
+      _AIRFLOW_WWW_USER_CREATE: "true"
+      _AIRFLOW_WWW_USER_USERNAME: admin
+      _AIRFLOW_WWW_USER_PASSWORD: admin
+
+  # ── Airflow webserver ─────────────────────────────────────────────────────────
+  airflow-webserver:
+    <<: *airflow-common
+    command: webserver
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
+
+  # ── Airflow scheduler ─────────────────────────────────────────────────────────
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8974/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
+
+  # ── Standalone scorer (Cloud Run target) ──────────────────────────────────────
+  scorer:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.scorer
+    env_file: .env
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      MODEL_PATH: /app/models/lgbm_fraud.pkl
+    volumes:
+      - ./models:/app/models:ro
+    profiles:
+      - scorer   # only started with: docker compose --profile scorer up scorer
+    depends_on:
+      - postgres
+
+volumes:
+  postgres_data:

@@ -1,0 +1,15 @@
+# Copy this file to ~/.dbt/profiles.yml and fill in your credentials.
+# When running inside Docker Compose, the values come from .env automatically.
+
+ml_batch_pipeline:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: "{{ env_var('DB_HOST', 'localhost') }}"
+      port: "{{ env_var('DB_PORT', '5432') | int }}"
+      dbname: "{{ env_var('DB_NAME', 'pipeline_db') }}"
+      user: "{{ env_var('DB_USER', 'pipeline_user') }}"
+      password: "{{ env_var('DB_PASSWORD', 'pipeline_pass') }}"
+      schema: staging   # default schema — overridden per model folder
+      threads: 4

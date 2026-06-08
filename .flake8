@@ -1,0 +1,20 @@
+[flake8]
+max-line-length = 100
+exclude =
+    .git,
+    __pycache__,
+    .venv,
+    venv,
+    build,
+    dist,
+    dbt/target,
+    dbt/dbt_packages,
+    .eggs
+per-file-ignores =
+    # Allow unused imports in __init__ files
+    __init__.py: F401
+ignore =
+    # Whitespace before ':' (conflicts with black-style slice formatting)
+    E203,
+    # Line break before binary operator (W504 is preferred)
+    W503

@@ -1,0 +1,49 @@
+version: 2
+
+models:
+  - name: fct_transaction_features
+    description: >
+      Feature-engineered transaction table. One row per transaction.
+      Contains velocity, behavioural, geographic, and temporal features
+      ready for the batch scoring step.
+    columns:
+      - name: transaction_id
+        description: "Unique transaction identifier."
+        tests:
+          - not_null
+          - unique
+      - name: amount
+        description: "Transaction amount."
+        tests:
+          - not_null
+      - name: txn_count_1h
+        description: "Number of transactions this card made in the last 1 hour."
+        tests:
+          - not_null
+      - name: amt_ratio
+        description: "Current amount divided by rolling 30-txn mean for this card."
+        tests:
+          - not_null
+      - name: distance_km
+        description: "Haversine distance from card home location to merchant."
+        tests:
+          - not_null
+      - name: batch_date
+        description: "The date this batch was ingested."
+        tests:
+          - not_null
+
+  - name: fct_daily_summary
+    description: >
+      One row per batch_date with aggregate statistics.
+      Used for drift detection reference window and pipeline audit.
+    columns:
+      - name: batch_date
+        description: "The calendar date."
+        tests:
+          - not_null
+          - unique
+      - name: n_transactions
+        description: "Total transactions in this batch."
+        tests:
+          - not_null

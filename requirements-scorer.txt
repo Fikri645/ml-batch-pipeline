@@ -1,0 +1,10 @@
+# Minimal dependencies for the Cloud Run scorer container only
+lightgbm==4.3.0
+scikit-learn==1.4.2
+pandas==2.2.1
+numpy==1.26.4
+joblib==1.4.0
+psycopg2-binary==2.9.9
+SQLAlchemy==2.0.29
+python-dotenv==1.0.1
+requests==2.31.0

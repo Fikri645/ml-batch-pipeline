@@ -1,0 +1,37 @@
+# ── Batch Scorer — GCP Cloud Run Job ─────────────────────────────────────────
+#
+# A minimal, self-contained image for running the batch scoring step.
+# Deploy to GCP Cloud Run Jobs:
+#
+#   gcloud builds submit --tag gcr.io/$PROJECT/fraud-scorer .
+#   gcloud run jobs create fraud-batch-scorer \
+#       --image gcr.io/$PROJECT/fraud-scorer \
+#       --region asia-southeast1 \
+#       --set-env-vars DB_HOST=...,DB_NAME=...,MODEL_PATH=/app/models/lgbm_fraud.pkl
+#
+# ─────────────────────────────────────────────────────────────────────────────
+
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# System dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Python dependencies (scorer subset — no Airflow, no dbt)
+COPY requirements-scorer.txt /tmp/requirements-scorer.txt
+RUN pip install --no-cache-dir -r /tmp/requirements-scorer.txt
+
+# Project source
+COPY src/ /app/src/
+COPY models/ /app/models/
+COPY scripts/init_db.py /app/scripts/init_db.py
+
+ENV PYTHONPATH=/app
+
+# Entry point: score a specific date
+# Usage: docker run scorer python -m src.entrypoint --date 2026-06-08
+COPY docker/scorer_entrypoint.py /app/scorer_entrypoint.py
+ENTRYPOINT ["python", "/app/scorer_entrypoint.py"]
