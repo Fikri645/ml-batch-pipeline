@@ -99,7 +99,7 @@ def generate_batch(
     rng = np.random.default_rng(seed)
 
     cards = get_card_pool()
-    n_fraud = max(1, int(n_transactions * fraud_rate))
+    n_fraud = int(n_transactions * fraud_rate)
     # ── Timestamps ────────────────────────────────────────────────────────────
     day_start = date.replace(hour=0, minute=0, second=0, microsecond=0)
     seconds = rng.uniform(0, 86400, n_transactions).astype(int)
