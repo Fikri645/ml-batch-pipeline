@@ -26,7 +26,7 @@ jobs:
       - name: Run flake8
         run: flake8 src/ scripts/ dags/ tests/ docker/scorer_entrypoint.py
 
-  # ── 2. Unit tests ──────────────────────────────────────────────────────────
+  # ── 2. Unit tests + coverage ───────────────────────────────────────────────
   test:
     name: Unit Tests
     runs-on: ubuntu-latest
@@ -42,7 +42,6 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          # Install core ML/data deps + test deps only (no airflow, no dbt, no psycopg2 binary for CI)
           pip install \
             lightgbm==4.3.0 \
             scikit-learn==1.4.2 \
@@ -54,21 +53,13 @@ jobs:
             requests==2.31.0 \
             pytest==8.1.1 \
             pytest-cov==5.0.0
-
-          # psycopg2-binary may fail on some CI runners — install with fallback
           pip install psycopg2-binary==2.9.9 || pip install psycopg2==2.9.9
 
-      - name: Run unit tests with coverage
+      - name: Run tests
         env:
           DATABASE_URL: postgresql://fake:fake@localhost:5432/fake_db
           MODEL_PATH: models/lgbm_fraud.pkl
-        run: |
-          pytest tests/ \
-            --cov=src \
-            --cov-report=term-missing \
-            --cov-report=xml \
-            -v \
-            --ignore=tests/test_score.py  # score tests need live DB mock wiring
+        run: pytest   # config in pytest.ini
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v4
@@ -77,46 +68,7 @@ jobs:
           name: coverage-report
           path: coverage.xml
 
-  # ── 3. Full test suite (with mocked DB) ───────────────────────────────────
-  test-full:
-    name: Full Test Suite (mocked DB)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: pip
-
-      - name: Install dependencies
-        run: |
-          pip install --upgrade pip
-          pip install \
-            lightgbm==4.3.0 \
-            scikit-learn==1.4.2 \
-            pandas==2.2.1 \
-            numpy==1.26.4 \
-            joblib==1.4.0 \
-            SQLAlchemy==2.0.29 \
-            python-dotenv==1.0.1 \
-            requests==2.31.0 \
-            pytest==8.1.1 \
-            pytest-cov==5.0.0
-          pip install psycopg2-binary==2.9.9 || pip install psycopg2==2.9.9
-
-      - name: Run all tests
-        env:
-          DATABASE_URL: postgresql://fake:fake@localhost:5432/fake_db
-          MODEL_PATH: models/lgbm_fraud.pkl
-        run: |
-          pytest tests/ \
-            --cov=src \
-            --cov-report=term-missing \
-            -v
-
-  # ── 4. DAG import test ────────────────────────────────────────────────────
+  # ── 3. DAG import test ────────────────────────────────────────────────────
   dag-import:
     name: DAG Import Test
     runs-on: ubuntu-latest
@@ -132,18 +84,17 @@ jobs:
       - name: Install Airflow + providers
         run: |
           pip install --upgrade pip
-          # Pin Airflow version to match docker-compose image
           AIRFLOW_VERSION=2.9.1
           PYTHON_VERSION=3.11
           CONSTRAINT_URL="https://raw.githubusercontent.com/apache/airflow/constraints-${AIRFLOW_VERSION}/constraints-${PYTHON_VERSION}.txt"
-          # Let the constraint file resolve the provider version (avoids pin conflicts)
+          # Let the constraint file resolve provider version (avoids pin conflicts)
           pip install "apache-airflow==${AIRFLOW_VERSION}" \
             apache-airflow-providers-postgres \
             --constraint "${CONSTRAINT_URL}"
 
-          # Install src deps that DAG imports at module level.
-          # DO NOT install SQLAlchemy separately — Airflow 2.9 requires 1.4.x
-          # and the constraint file already pins it correctly.
+          # Install project deps that DAG imports at module level.
+          # DO NOT install SQLAlchemy separately — Airflow 2.9 requires 1.4.x;
+          # the constraint file pins it correctly.
           pip install \
             lightgbm==4.3.0 \
             scikit-learn==1.4.2 \
@@ -160,13 +111,11 @@ jobs:
           DATABASE_URL: postgresql://fake:fake@localhost:5432/fake_db
           MODEL_PATH: models/lgbm_fraud.pkl
         run: |
-          # Set up a minimal Airflow home with sqlite metadata DB
           export AIRFLOW_HOME=$(mktemp -d)
           export AIRFLOW__DATABASE__SQL_ALCHEMY_CONN="sqlite:///${AIRFLOW_HOME}/airflow.db"
-          # db init (not migrate) is the stable command for Airflow 2.x in CI
+          # db init is the stable init command for Airflow 2.x in CI
           airflow db init 2>/dev/null || airflow db migrate 2>/dev/null || true
 
-          # Add project root to PYTHONPATH so src/ is importable
           export PYTHONPATH="${GITHUB_WORKSPACE}:${PYTHONPATH}"
 
           python - <<'EOF'
@@ -184,7 +133,7 @@ jobs:
           print(f"✓ DAGs loaded successfully: {list(dagbag.dag_ids)}")
           EOF
 
-  # ── 5. dbt parse ──────────────────────────────────────────────────────────
+  # ── 4. dbt parse ──────────────────────────────────────────────────────────
   dbt-compile:
     name: dbt Parse
     runs-on: ubuntu-latest
@@ -198,7 +147,7 @@ jobs:
           cache: pip
 
       - name: Install dbt-postgres
-        # Pin dbt-core<2.0 explicitly — pip may otherwise resolve to 2.0 alpha which dropped postgres
+        # Pin dbt-core<2.0 — pip may otherwise resolve to 2.0 alpha which dropped postgres
         run: pip install "dbt-postgres==1.8.0" "dbt-core>=1.8.0,<2.0.0"
 
       - name: Write dbt profiles.yml

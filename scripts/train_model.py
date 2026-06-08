@@ -54,8 +54,10 @@ def engineer_features(raw_df: pd.DataFrame) -> pd.DataFrame:
 
     # ── Temporal ─────────────────────────────────────────────────────────────
     df["hour_of_day"] = df["transaction_time"].dt.hour
-    df["day_of_week"] = df["transaction_time"].dt.dayofweek
-    df["is_weekend"] = (df["day_of_week"] >= 5).astype(int)
+    # Use SQL DOW convention (Sun=0, Mon=1 … Sat=6) to match dbt mart.
+    # Python dayofweek is Mon=0…Sun=6, so shift by +1 mod 7.
+    df["day_of_week"] = (df["transaction_time"].dt.dayofweek + 1) % 7
+    df["is_weekend"] = df["day_of_week"].isin([0, 6]).astype(int)  # Sun=0, Sat=6
 
     # ── Haversine distance ────────────────────────────────────────────────────
     lat1 = np.radians(df["lat"].values)
@@ -68,40 +70,31 @@ def engineer_features(raw_df: pd.DataFrame) -> pd.DataFrame:
     df["distance_km"] = 6371.0 * 2 * np.arcsin(np.sqrt(a))
 
     # ── Velocity features (rolling, per card) ─────────────────────────────────
+    # Use pandas time-based rolling for O(n log n) instead of O(n²) per-card loop.
     df = df.sort_values(["card_number", "transaction_time"])
     result_parts = []
 
-    for card_id, grp in df.groupby("card_number", sort=False):
-        grp = grp.sort_values("transaction_time").copy()
-        times = grp["transaction_time"]
-        amounts = grp["amount"].values
+    for _, grp in df.groupby("card_number", sort=False):
+        grp = grp.sort_values("transaction_time").set_index("transaction_time")
 
-        txn_count_1h = []
-        txn_count_24h = []
-        txn_count_7d = []
-        amt_sum_1h = []
-        amt_ratio = []
+        grp["txn_count_1h"] = (
+            grp["amount"].rolling("1h").count().astype(int)
+        )
+        grp["txn_count_24h"] = (
+            grp["amount"].rolling("24h").count().astype(int)
+        )
+        grp["txn_count_7d"] = (
+            grp["amount"].rolling("7d").count().astype(int)
+        )
+        grp["amt_sum_1h"] = grp["amount"].rolling("1h").sum()
 
-        for i, (ts, amt) in enumerate(zip(times, amounts)):
-            w1h = grp[(ts - times <= pd.Timedelta("1h")) & (times <= ts)]
-            w24h = grp[(ts - times <= pd.Timedelta("24h")) & (times <= ts)]
-            w7d = grp[(ts - times <= pd.Timedelta("7d")) & (times <= ts)]
+        # amt_ratio: amount / rolling mean of prior 30 transactions (excludes self)
+        prev_mean = grp["amount"].shift(1).rolling(30, min_periods=1).mean()
+        grp["amt_ratio"] = grp["amount"] / prev_mean.where(
+            prev_mean > 0, grp["amount"]
+        )
 
-            txn_count_1h.append(len(w1h))
-            txn_count_24h.append(len(w24h))
-            txn_count_7d.append(len(w7d))
-            amt_sum_1h.append(w1h["amount"].sum())
-
-            prev_30 = amounts[max(0, i - 30):i]
-            ref_amt = prev_30.mean() if len(prev_30) > 0 else amt
-            amt_ratio.append(amt / ref_amt if ref_amt > 0 else 1.0)
-
-        grp["txn_count_1h"] = txn_count_1h
-        grp["txn_count_24h"] = txn_count_24h
-        grp["txn_count_7d"] = txn_count_7d
-        grp["amt_sum_1h"] = amt_sum_1h
-        grp["amt_ratio"] = amt_ratio
-        result_parts.append(grp)
+        result_parts.append(grp.reset_index())
 
     return pd.concat(result_parts, ignore_index=True)
 

@@ -26,8 +26,14 @@ RUN pip install --no-cache-dir -r /tmp/requirements-scorer.txt
 
 # Project source
 COPY src/ /app/src/
-COPY models/ /app/models/
 COPY scripts/init_db.py /app/scripts/init_db.py
+
+# Model artifact — must be present BEFORE building this image.
+# Train locally first:  python scripts/train_model.py
+# Then build:          docker build -f docker/Dockerfile.scorer -t fraud-scorer .
+# For Cloud Run, the model can alternatively be downloaded from GCS at startup.
+RUN mkdir -p /app/models
+COPY models/ /app/models/
 
 ENV PYTHONPATH=/app
 
