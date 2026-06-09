@@ -6,7 +6,7 @@
 [![dbt 1.8](https://img.shields.io/badge/dbt-1.8-FF694B?logo=dbt)](https://docs.getdbt.com/)
 [![LightGBM](https://img.shields.io/badge/LightGBM-4.3-green)](https://lightgbm.readthedocs.io/)
 
-**Production-grade fraud-detection batch pipeline** orchestrated with Apache Airflow, feature-engineered with dbt, and deployed as a Cloud Run Job on GCP. Scores 500+ synthetic Indonesian transactions daily with PSI-based feature drift monitoring and Slack alerting.
+**Production-grade fraud-detection batch pipeline** orchestrated with Apache Airflow, feature-engineered with dbt, and deployable as a Cloud Run Job on GCP. Scores 500+ synthetic Indonesian transactions every 10 minutes (simulation mode) with PSI-based feature drift monitoring and Slack alerting. Includes a live-stream data simulator for continuous injection between scheduled runs, plus a rolling retention policy to keep the database bounded during long demos.
 
 ---
 
@@ -19,7 +19,7 @@
 │  ┌──────────────┐    ┌──────────────────────────────────────────────────┐  │
 │  │  PostgreSQL  │    │              Apache Airflow 2.9                  │  │
 │  │     :5432    │    │                                                  │  │
-│  │              │    │  fraud_scoring_pipeline  (daily @ 01:00 UTC)    │  │
+│  │              │    │  fraud_scoring_pipeline  (every 10 min — sim mode)  │  │
 │  │  airflow_meta│    │                                                  │  │
 │  │  pipeline_db │    │  ingest_transactions                            │  │
 │  │    schemas:  │    │        │                                         │  │
@@ -92,10 +92,14 @@ ml-batch-pipeline/
 │   ├── drift.py           # PSI drift detection + DriftReport dataclass
 │   └── alerts.py          # RunSummary dataclass, Slack webhook alerts
 ├── scripts/
-│   ├── init_db.py         # Create all schemas and tables
-│   └── train_model.py     # Train LightGBM on 90 days of synthetic data
+│   ├── init_db.py          # Create all schemas and tables
+│   ├── train_model.py      # Train LightGBM on 90 days of synthetic data
+│   └── simulate_stream.py  # Continuous live-data simulator (demo mode)
 ├── dbt/
 │   ├── dbt_project.yml
+│   ├── profiles.yml                 # DB connection config (env-var driven)
+│   ├── macros/
+│   │   └── generate_schema_name.sql # Override default target.schema + custom prefix
 │   └── models/
 │       ├── staging/
 │       │   ├── sources.yml          # raw.transactions source definition
@@ -184,7 +188,28 @@ docker compose exec airflow-scheduler bash -c \
 
 Open [http://localhost:8080](http://localhost:8080) → login `admin / admin`
 
-Enable **fraud_scoring_pipeline** and trigger a manual run, or wait for the daily schedule (01:00 UTC).
+Enable **fraud_scoring_pipeline** and trigger a manual run, or wait — it fires automatically every 10 minutes in simulation mode. Each run inserts a fresh 500-transaction batch (different random seed per run) and accumulates data throughout the day.
+
+### 6 — (Optional) Run the stream simulator
+
+Inject extra transactions between DAG runs to simulate a live feed:
+
+```bash
+docker compose exec airflow-scheduler bash -c \
+  "cd /opt/airflow/project && python scripts/simulate_stream.py \
+   --interval 60 --batch-size 30"
+```
+
+Options:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--interval` | 120 s | Seconds between mini-batches |
+| `--batch-size` | 50 | Transactions per batch |
+| `--fraud-rate` | 0.006 | Fraction flagged as fraud |
+| `--max-rows` | 10 000 | Retention cap — evicts 500 oldest rows when exceeded |
+
+The simulator and the DAG co-exist safely: both use `ON CONFLICT DO NOTHING`, and different timestamps produce different MD5 transaction IDs.
 
 ---
 
@@ -227,6 +252,10 @@ Core feature mart used by the scorer. Key features computed with SQL window func
 ### Mart — `fct_daily_summary` (table)
 
 Aggregate stats per `batch_date` — used for monitoring dashboards.
+
+### Schema naming — `generate_schema_name` macro
+
+dbt's default behaviour prepends `target.schema` to every custom schema name (producing `staging_marts` instead of `marts`). The `macros/generate_schema_name.sql` override uses the custom schema name directly, so models land exactly in `staging`, `marts`, etc. as expected by the scorer.
 
 ---
 
@@ -356,6 +385,18 @@ The scorer is a run-to-completion workload, not a long-running service. Cloud Ru
 
 **Why synthetic data?**
 No Kaggle account or dataset download required. The generator produces statistically realistic Indonesian transaction patterns (home location clustering, fraud geo-distance, category biases) and is fully deterministic with a fixed seed.
+
+**Why every 10 minutes instead of daily?**
+For a local demo the daily schedule means waiting 24 hours to observe accumulation. Running every 10 minutes with a unique seed per execution timestamp produces statistically distinct batches that accumulate throughout the day — the pipeline behaves exactly as it would in production, just faster. Switch back to a daily cron by changing one line in the DAG.
+
+**Why `ON CONFLICT DO NOTHING` instead of DELETE + INSERT?**
+Idempotent appends let the stream simulator and the DAG coexist without data loss. If a task retries (same seed → same MD5 transaction IDs), duplicates are silently skipped. New runs with different seeds produce genuinely new rows that accumulate safely.
+
+**Why a retention policy?**
+Unconstrained accumulation would eventually exhaust disk during long-running demos. When today's row count exceeds 10 000, the pipeline evicts the 500 oldest rows using `ctid` ordering — a fast, index-free PostgreSQL delete. The 10 000 / 500 constants are tunable via `RETENTION_MAX_ROWS` / `RETENTION_EVICT_ROWS` in the DAG.
+
+**Why detailed fraud logs in `batch_score`?**
+The Airflow UI `batch_score` task log shows per-flagged-transaction details: transaction ID, card tail, fraud probability, amount, amount-to-mean ratio, distance from home (km), and hour of day. This makes fraud signal visible during demos without needing a separate query against the database.
 
 ---
 
