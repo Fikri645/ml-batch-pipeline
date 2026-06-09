@@ -61,6 +61,10 @@ MODEL_PATH = str(_PROJECT_ROOT / "models" / "lgbm_fraud.pkl")
 # PSI threshold — must match src/config.py
 PSI_ALERT_THRESHOLD = float(os.getenv("PSI_ALERT_THRESHOLD", "0.2"))
 
+# Retention policy for raw.transactions (simulation mode)
+RETENTION_MAX_ROWS = 10_000   # eviction triggers when today's count exceeds this
+RETENTION_EVICT_ROWS = 500    # number of oldest rows to delete per eviction pass
+
 
 # ── DAG ───────────────────────────────────────────────────────────────────────
 
@@ -154,6 +158,27 @@ def fraud_scoring_pipeline():
                 text("SELECT COUNT(*) FROM raw.transactions WHERE batch_date = :d"),
                 {"d": str(batch_date)},
             ).scalar()
+
+        # ── Retention: drop oldest rows once the cap is hit ───────────────────
+        if total > RETENTION_MAX_ROWS:
+            with engine.begin() as conn:
+                deleted = conn.execute(
+                    text("""
+                        DELETE FROM raw.transactions
+                        WHERE ctid IN (
+                            SELECT ctid FROM raw.transactions
+                            WHERE batch_date = :d
+                            ORDER BY ingested_at ASC
+                            LIMIT :n
+                        )
+                    """),
+                    {"d": str(batch_date), "n": RETENTION_EVICT_ROWS},
+                ).rowcount
+            total -= deleted
+            log.info(
+                "Retention: deleted %d oldest rows (cap=%d).  Total now: %d.",
+                deleted, RETENTION_MAX_ROWS, total,
+            )
 
         log.info(
             "Added %d txns for %s.  Total accumulated today: %d rows.",

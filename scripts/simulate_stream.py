@@ -88,6 +88,24 @@ def _get_today_count(engine, batch_date) -> int:
         ).scalar()
 
 
+def _evict_oldest(engine, batch_date, max_rows: int, evict_n: int) -> int:
+    """Delete the oldest evict_n rows when total exceeds max_rows. Returns deleted count."""
+    with engine.begin() as conn:
+        deleted = conn.execute(
+            text("""
+                DELETE FROM raw.transactions
+                WHERE ctid IN (
+                    SELECT ctid FROM raw.transactions
+                    WHERE batch_date = :d
+                    ORDER BY ingested_at ASC
+                    LIMIT :n
+                )
+            """),
+            {"d": str(batch_date), "n": evict_n},
+        ).rowcount
+    return deleted
+
+
 # ── Main loop ─────────────────────────────────────────────────────────────────
 
 
@@ -110,6 +128,10 @@ def main() -> None:
     parser.add_argument(
         "--runs", type=int, default=0,
         help="Stop after N batches; 0 = run forever (default: 0)",
+    )
+    parser.add_argument(
+        "--max-rows", type=int, default=10_000,
+        help="Delete oldest 500 rows when today's total exceeds this (default: 10000)",
     )
     args = parser.parse_args()
 
@@ -144,15 +166,22 @@ def main() -> None:
         inserted = _insert_batch(engine, df)
         today_total = _get_today_count(engine, batch_date)
 
+        # Retention: drop oldest rows once cap is hit
+        evicted = 0
+        if today_total > args.max_rows:
+            evicted = _evict_oldest(engine, batch_date, args.max_rows, 500)
+            today_total -= evicted
+
         n_fraud_batch = int(df["is_fraud"].sum())
         total_inserted += inserted
         total_fraud += n_fraud_batch
 
+        evict_note = f"  | evicted {evicted} oldest" if evicted else ""
         logger.info(
-            "Batch #%-3d  +%d txns (%d fraud)  |  hari ini: %d txns  |  "
+            "Batch #%-3d  +%d txns (%d fraud)  |  hari ini: %d txns%s  |  "
             "session total: %d txns / %d fraud  |  next in %ds",
             batch_num, inserted, n_fraud_batch,
-            today_total,
+            today_total, evict_note,
             total_inserted, total_fraud,
             args.interval,
         )
