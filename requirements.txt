@@ -15,8 +15,12 @@ psycopg2-binary==2.9.9
 #   (CI job in .github/workflows/ci.yml already does this directly.)
 
 # ── dbt ───────────────────────────────────────────────────────────────────────
+# dbt-core MUST be pinned to the exact same minor as dbt-postgres (1.8.0).
+# Using a range (>=1.8.0,<2.0.0) causes pip to try 1.11.x which requires
+# opentelemetry>=1.27.0, conflicting with Airflow 2.9.1's pinned 1.24.0.
+# The resulting backtracking loop never resolves (100+ version iterations).
 dbt-postgres==1.8.0
-dbt-core>=1.8.0,<2.0.0
+dbt-core==1.8.0
 
 # ── Airflow providers (installed alongside the official Airflow image) ─────────
 # Note: apache-airflow-providers-google is already bundled in the base Airflow
