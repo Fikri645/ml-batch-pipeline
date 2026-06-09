@@ -1,7 +1,13 @@
 # ── ML / Data ─────────────────────────────────────────────────────────────────
 lightgbm==4.3.0
 scikit-learn==1.4.2
-pandas==2.2.1
+pandas==2.1.4
+# NOTE: pandas 2.2.x raised minimum SQLAlchemy to 2.0.0.
+# Airflow 2.9.1 forces SQLAlchemy 1.4.52 in Docker, so pandas 2.2.x makes
+# import_optional_dependency('sqlalchemy') return None → df.to_sql() falls back
+# to the DBAPI2 code path (SQLiteDatabase) and crashes with AttributeError.
+# pandas 2.1.4 is the last release with minimum SQLAlchemy = 1.4.0 and is
+# fully compatible with both SQLAlchemy 1.4.x (Docker) and 2.0.x (CI).
 numpy==1.26.4
 joblib==1.4.0
 
@@ -24,8 +30,7 @@ dbt-core==1.8.0
 
 # ── Airflow providers (installed alongside the official Airflow image) ─────────
 # Note: apache-airflow-providers-google is already bundled in the base Airflow
-# image and pins pandas<2.2. Do NOT add it here — it conflicts with pandas==2.2.1
-# which is needed for the scorer and dbt feature pipeline outside Airflow.
+# image and pins pandas<2.2. Do NOT add it here — it conflicts.
 apache-airflow-providers-postgres==5.10.0
 
 # ── Utilities ─────────────────────────────────────────────────────────────────

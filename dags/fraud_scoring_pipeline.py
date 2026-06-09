@@ -217,7 +217,7 @@ def fraud_scoring_pipeline():
 
     # ── 7. Branch gate ────────────────────────────────────────────────────────
 
-    def _branch_on_drift(drift_result: dict, **context) -> str:
+    def _branch_on_drift(**context) -> str:
         """Return task_id of the next branch based on drift detection result."""
         # XCom value is fetched from the upstream task
         ti = context["ti"]

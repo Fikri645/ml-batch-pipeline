@@ -1,0 +1,16 @@
+# dbt connection profile for ml_batch_pipeline.
+# Reads credentials from environment variables so the same file works
+# both inside Docker Compose (DB_HOST=postgres) and locally (DB_HOST=localhost).
+
+ml_batch_pipeline:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: "{{ env_var('DB_HOST', 'localhost') }}"
+      port: "{{ env_var('DB_PORT', '5432') | int }}"
+      dbname: "{{ env_var('DB_NAME', 'pipeline_db') }}"
+      user: "{{ env_var('DB_USER', 'pipeline_user') }}"
+      password: "{{ env_var('DB_PASSWORD', 'pipeline_pass') }}"
+      schema: staging   # default schema — overridden per model folder
+      threads: 4
