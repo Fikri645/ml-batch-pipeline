@@ -35,10 +35,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, text  # noqa: E402
 
-from src.config import DATABASE_URL, FRAUD_RATE_BASELINE
-from src.data_generator import generate_batch
+from src.config import DATABASE_URL, FRAUD_RATE_BASELINE  # noqa: E402
+from src.data_generator import generate_batch  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
