@@ -133,6 +133,31 @@ def score_batch(
         n_flagged,
         100 * n_flagged / len(scores_df),
     )
+
+    # ── Detailed fraud log ────────────────────────────────────────────────────
+    if n_flagged > 0:
+        detail_cols = ["transaction_id", "amount", "amt_ratio", "distance_km", "hour_of_day"]
+        fraud_detail = (
+            scores_df[scores_df["predicted_fraud"] == 1]
+            .merge(features_df[detail_cols], on="transaction_id")
+            .sort_values("fraud_probability", ascending=False)
+        )
+        logger.info("─" * 72)
+        logger.info("FRAUD TERDETEKSI — %d transaksi:", n_flagged)
+        for _, row in fraud_detail.iterrows():
+            logger.info(
+                "  >> txn=%-16s  kartu=...%s  prob=%5.1f%%"
+                "  Rp %-10s  ratio=%4.1fx  jarak=%5.0fkm  jam=%02d:xx",
+                row["transaction_id"],
+                str(row["card_number"])[-4:],
+                100 * row["fraud_probability"],
+                f"{row['amount']:,.0f}",    # pre-format: % operator doesn't support ","
+                row["amt_ratio"],
+                row["distance_km"],
+                int(row["hour_of_day"]),
+            )
+        logger.info("─" * 72)
+
     return scores_df
 
 

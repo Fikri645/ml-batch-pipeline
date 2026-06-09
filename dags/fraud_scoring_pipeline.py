@@ -67,8 +67,8 @@ PSI_ALERT_THRESHOLD = float(os.getenv("PSI_ALERT_THRESHOLD", "0.2"))
 
 @dag(
     dag_id="fraud_scoring_pipeline",
-    description="Daily batch fraud scoring with dbt feature engineering and PSI drift detection.",
-    schedule="0 1 * * *",  # 01:00 UTC every day
+    description="Fraud scoring pipeline — runs every 10 min, accumulates data for simulation.",
+    schedule="*/10 * * * *",  # every 10 minutes (simulation / demo mode)
     start_date=datetime(2026, 1, 1),
     catchup=False,
     default_args=DEFAULT_ARGS,
@@ -96,47 +96,70 @@ def fraud_scoring_pipeline():
     @task(task_id="ingest_transactions")
     def ingest_transactions(**context) -> dict:
         """
-        Generate a synthetic daily batch and insert into raw.transactions.
+        Generate a synthetic mini-batch and APPEND it into raw.transactions.
 
-        In a real pipeline this task would read from S3, Kafka, or an API.
-        Here we simulate new data with the same generator used for training,
-        but with a date-based seed so each day's batch is distinct.
+        Each 10-minute run uses execution_date as the random seed, so each run
+        produces a statistically different set of transactions.  Data accumulates
+        over the day (ON CONFLICT DO NOTHING prevents duplicates on retries).
+
+        The simulate_stream.py script can run in parallel to add extra batches
+        between DAG runs, simulating a live feed.
         """
-        from sqlalchemy import create_engine
+        from sqlalchemy import create_engine, text
 
         from src.config import BATCH_SIZE, DATABASE_URL, FRAUD_RATE_BASELINE
         from src.data_generator import generate_batch
 
-        # Use execution_date to determine which day to simulate
         execution_date: datetime = context["logical_date"]
-        batch_date = execution_date.date() - timedelta(days=1)
+        # Use today's date as batch_date so data accumulates throughout the day
+        batch_date = execution_date.date()
+        # Use the full execution timestamp as seed → different data every 10-min run
+        seed = int(execution_date.timestamp()) % (2**31)
 
-        log.info("Generating batch for %s (%d transactions)…", batch_date, BATCH_SIZE)
+        log.info(
+            "Generating batch for %s (seed=%d, %d transactions)…",
+            batch_date, seed, BATCH_SIZE,
+        )
         df = generate_batch(
             date=datetime.combine(batch_date, datetime.min.time()),
             n_transactions=BATCH_SIZE,
             fraud_rate=FRAUD_RATE_BASELINE,
+            seed=seed,
         )
+        df["is_fraud"] = df["is_fraud"].astype(bool)
 
         engine = create_engine(DATABASE_URL)
-        # Idempotent: delete existing rows for this batch_date before insert.
-        # to_sql must receive a Connection (not Engine) for pandas 2.x + SQLAlchemy 1.4.x.
+        # Append-only with ON CONFLICT DO NOTHING so:
+        #   • retries are safe (same seed = same IDs → silently skipped)
+        #   • multiple runs per day accumulate data (different seeds = different IDs)
+        #   • simulate_stream.py can co-exist without data loss
         with engine.begin() as conn:
-            from sqlalchemy import text
             conn.execute(
-                text("DELETE FROM raw.transactions WHERE batch_date = :d"),
+                text("""
+                    INSERT INTO raw.transactions
+                    (transaction_id, card_number, merchant, category, amount,
+                     lat, long, merchant_lat, merchant_long,
+                     transaction_time, is_fraud, batch_date)
+                    VALUES
+                    (:transaction_id, :card_number, :merchant, :category, :amount,
+                     :lat, :long, :merchant_lat, :merchant_long,
+                     :transaction_time, :is_fraud, :batch_date)
+                    ON CONFLICT (transaction_id, batch_date) DO NOTHING
+                """),
+                df.to_dict("records"),
+            )
+
+        with engine.connect() as conn:
+            total = conn.execute(
+                text("SELECT COUNT(*) FROM raw.transactions WHERE batch_date = :d"),
                 {"d": str(batch_date)},
-            )
-            df.to_sql(
-                "transactions",
-                conn,
-                schema="raw",
-                if_exists="append",
-                index=False,
-                method="multi",
-            )
-        log.info("Inserted %d rows for %s into raw.transactions.", len(df), batch_date)
-        return {"batch_date": str(batch_date), "n_rows": len(df)}
+            ).scalar()
+
+        log.info(
+            "Added %d txns for %s.  Total accumulated today: %d rows.",
+            len(df), batch_date, total,
+        )
+        return {"batch_date": str(batch_date), "n_rows": total}
 
     # ── 2–4. dbt tasks ────────────────────────────────────────────────────────
 
