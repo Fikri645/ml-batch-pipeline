@@ -142,17 +142,18 @@ def _persist_scores(scores_df: pd.DataFrame, db_url: str) -> None:
         return
     engine = create_engine(db_url)
     batch_date = scores_df["batch_date"].iloc[0]
+    # to_sql must receive a Connection (not Engine) for pandas 2.x + SQLAlchemy 1.4.x.
     with engine.begin() as conn:
         conn.execute(
             text("DELETE FROM scores.daily_predictions WHERE batch_date = :d"),
             {"d": str(batch_date)},
         )
-    scores_df.to_sql(
-        "daily_predictions",
-        engine,
-        schema="scores",
-        if_exists="append",
-        index=False,
-        method="multi",
-    )
+        scores_df.to_sql(
+            "daily_predictions",
+            conn,
+            schema="scores",
+            if_exists="append",
+            index=False,
+            method="multi",
+        )
     logger.info("Persisted %d score rows to scores.daily_predictions", len(scores_df))

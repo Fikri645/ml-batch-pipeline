@@ -65,13 +65,15 @@ def log_run(summary: RunSummary, db_url: str = DATABASE_URL) -> None:
         "run_at": summary.run_at.isoformat(),
     }
     engine = create_engine(db_url)
-    pd.DataFrame([row]).to_sql(
-        "pipeline_runs",
-        engine,
-        schema="audit",
-        if_exists="append",
-        index=False,
-    )
+    # to_sql must receive a Connection (not Engine) for pandas 2.x + SQLAlchemy 1.4.x.
+    with engine.begin() as conn:
+        pd.DataFrame([row]).to_sql(
+            "pipeline_runs",
+            conn,
+            schema="audit",
+            if_exists="append",
+            index=False,
+        )
     logger.info("Run logged for %s — status=%s", summary.batch_date, summary.run_status)
 
 

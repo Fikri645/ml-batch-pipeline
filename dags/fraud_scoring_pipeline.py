@@ -119,21 +119,22 @@ def fraud_scoring_pipeline():
         )
 
         engine = create_engine(DATABASE_URL)
-        # Idempotent: delete existing rows for this batch_date before insert
+        # Idempotent: delete existing rows for this batch_date before insert.
+        # to_sql must receive a Connection (not Engine) for pandas 2.x + SQLAlchemy 1.4.x.
         with engine.begin() as conn:
             from sqlalchemy import text
             conn.execute(
                 text("DELETE FROM raw.transactions WHERE batch_date = :d"),
                 {"d": str(batch_date)},
             )
-        df.to_sql(
-            "transactions",
-            engine,
-            schema="raw",
-            if_exists="append",
-            index=False,
-            method="multi",
-        )
+            df.to_sql(
+                "transactions",
+                conn,
+                schema="raw",
+                if_exists="append",
+                index=False,
+                method="multi",
+            )
         log.info("Inserted %d rows for %s into raw.transactions.", len(df), batch_date)
         return {"batch_date": str(batch_date), "n_rows": len(df)}
 

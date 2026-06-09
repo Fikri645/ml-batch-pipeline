@@ -195,15 +195,16 @@ def _persist_drift_report(report: DriftReport, db_url: str) -> None:
     ]
     df = pd.DataFrame(rows)
     engine = create_engine(db_url)
+    # to_sql must receive a Connection (not Engine) for pandas 2.x + SQLAlchemy 1.4.x.
     with engine.begin() as conn:
         conn.execute(
             text("DELETE FROM audit.drift_reports WHERE batch_date = :d"),
             {"d": str(report.batch_date)},
         )
-    df.to_sql(
-        "drift_reports",
-        engine,
-        schema="audit",
-        if_exists="append",
-        index=False,
-    )
+        df.to_sql(
+            "drift_reports",
+            conn,
+            schema="audit",
+            if_exists="append",
+            index=False,
+        )
