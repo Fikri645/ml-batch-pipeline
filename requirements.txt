@@ -7,7 +7,12 @@ joblib==1.4.0
 
 # ── Database ──────────────────────────────────────────────────────────────────
 psycopg2-binary==2.9.9
-SQLAlchemy==2.0.29
+# SQLAlchemy is intentionally NOT pinned here.
+# • In the Airflow Docker image, Airflow 2.9.1 requires sqlalchemy<2.0;
+#   the base image provides 1.4.x via its constraint file.
+# • For local dev & CI unit tests, install explicitly:
+#   pip install SQLAlchemy==2.0.29
+#   (CI job in .github/workflows/ci.yml already does this directly.)
 
 # ── dbt ───────────────────────────────────────────────────────────────────────
 dbt-postgres==1.8.0
